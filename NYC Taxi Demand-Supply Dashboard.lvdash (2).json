@@ -1,0 +1,1548 @@
+{
+  "datasets": [
+    {
+      "name": "borough_summary",
+      "displayName": "Borough Demand/Supply Summary (2018)",
+      "queryLines": [
+        "WITH demand AS (\n",
+        "  SELECT\n",
+        "    z.borough AS borough,\n",
+        "    COUNT(*) AS demand\n",
+        "  FROM\n",
+        "    delta.`/Volumes/workspace/default/nyc_taxi_delta/2018` t\n",
+        "      JOIN delta.`/Volumes/workspace/default/nyc_taxi_delta/taxi_zones` z\n",
+        "        ON t.PULocationID = z.LocationID\n",
+        "  WHERE\n",
+        "    z.borough IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    z.borough\n",
+        "),\n",
+        "supply AS (\n",
+        "  SELECT\n",
+        "    z.borough AS borough,\n",
+        "    COUNT(*) AS supply\n",
+        "  FROM\n",
+        "    delta.`/Volumes/workspace/default/nyc_taxi_delta/2018` t\n",
+        "      JOIN delta.`/Volumes/workspace/default/nyc_taxi_delta/taxi_zones` z\n",
+        "        ON t.DOLocationID = z.LocationID\n",
+        "  WHERE\n",
+        "    z.borough IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    z.borough\n",
+        ")\n",
+        "SELECT\n",
+        "  COALESCE(d.borough, s.borough) AS borough,\n",
+        "  COALESCE(d.demand, 0) AS demand,\n",
+        "  COALESCE(s.supply, 0) AS supply,\n",
+        "  ROUND(COALESCE(d.demand, 0) / COALESCE(s.supply, 0), 2) AS ratio\n",
+        "FROM\n",
+        "  demand d\n",
+        "    FULL OUTER JOIN supply s\n",
+        "      ON d.borough = s.borough\n",
+        "ORDER BY\n",
+        "  demand DESC"
+      ]
+    },
+    {
+      "name": "zone_summary",
+      "displayName": "Zone Demand/Supply Summary (2018)",
+      "queryLines": [
+        "WITH demand AS (\n",
+        "  SELECT\n",
+        "    z.zone_name AS zone,\n",
+        "    z.borough AS borough,\n",
+        "    COUNT(*) AS demand\n",
+        "  FROM\n",
+        "    delta.`/Volumes/workspace/default/nyc_taxi_delta/2018` t\n",
+        "      JOIN delta.`/Volumes/workspace/default/nyc_taxi_delta/taxi_zones` z\n",
+        "        ON t.PULocationID = z.LocationID\n",
+        "  WHERE\n",
+        "    z.borough IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    z.zone_name,\n",
+        "    z.borough\n",
+        "),\n",
+        "supply AS (\n",
+        "  SELECT\n",
+        "    z.zone_name AS zone,\n",
+        "    z.borough AS borough,\n",
+        "    COUNT(*) AS supply\n",
+        "  FROM\n",
+        "    delta.`/Volumes/workspace/default/nyc_taxi_delta/2018` t\n",
+        "      JOIN delta.`/Volumes/workspace/default/nyc_taxi_delta/taxi_zones` z\n",
+        "        ON t.DOLocationID = z.LocationID\n",
+        "  WHERE\n",
+        "    z.borough IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    z.zone_name,\n",
+        "    z.borough\n",
+        "),\n",
+        "zone_stats AS (\n",
+        "  SELECT\n",
+        "    COALESCE(d.zone, s.zone) AS zone,\n",
+        "    COALESCE(d.borough, s.borough) AS borough,\n",
+        "    COALESCE(d.demand, 0) AS demand,\n",
+        "    COALESCE(s.supply, 0) AS supply,\n",
+        "    ROUND(COALESCE(d.demand, 0) / NULLIF(COALESCE(s.supply, 0), 0), 2) AS ratio\n",
+        "  FROM\n",
+        "    demand d\n",
+        "      FULL OUTER JOIN supply s\n",
+        "        ON d.zone = s.zone\n",
+        "        AND d.borough = s.borough\n",
+        "  WHERE\n",
+        "    COALESCE(d.demand, 0) >= 100\n",
+        "),\n",
+        "ranked AS (\n",
+        "  SELECT\n",
+        "    zone,\n",
+        "    borough,\n",
+        "    demand,\n",
+        "    supply,\n",
+        "    ratio,\n",
+        "    ROW_NUMBER() OVER (PARTITION BY borough ORDER BY ratio DESC) AS rn\n",
+        "  FROM\n",
+        "    zone_stats\n",
+        ")\n",
+        "SELECT\n",
+        "  zone,\n",
+        "  borough,\n",
+        "  demand,\n",
+        "  supply,\n",
+        "  ratio\n",
+        "FROM\n",
+        "  ranked\n",
+        "WHERE\n",
+        "  rn <= 3\n",
+        "ORDER BY\n",
+        "  borough,\n",
+        "  ratio DESC"
+      ]
+    },
+    {
+      "name": "borough_rush",
+      "displayName": "Borough Rush Hour Pattern (2018)",
+      "queryLines": [
+        "WITH demand AS (\n",
+        "  SELECT\n",
+        "    z.borough AS borough,\n",
+        "    CASE\n",
+        "      WHEN HOUR(t.tpep_pickup_datetime) BETWEEN 7 AND 9 THEN 'Morning Rush'\n",
+        "      WHEN HOUR(t.tpep_pickup_datetime) BETWEEN 17 AND 19 THEN 'Evening Rush'\n",
+        "      ELSE 'Off-peak'\n",
+        "    END AS time_period,\n",
+        "    COUNT(*) AS demand\n",
+        "  FROM\n",
+        "    delta.`/Volumes/workspace/default/nyc_taxi_delta/2018` t\n",
+        "      JOIN delta.`/Volumes/workspace/default/nyc_taxi_delta/taxi_zones` z\n",
+        "        ON t.PULocationID = z.LocationID\n",
+        "  WHERE\n",
+        "    z.borough IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    z.borough,\n",
+        "    time_period\n",
+        "),\n",
+        "supply AS (\n",
+        "  SELECT\n",
+        "    z.borough AS borough,\n",
+        "    CASE\n",
+        "      WHEN HOUR(t.tpep_dropoff_datetime) BETWEEN 7 AND 9 THEN 'Morning Rush'\n",
+        "      WHEN HOUR(t.tpep_dropoff_datetime) BETWEEN 17 AND 19 THEN 'Evening Rush'\n",
+        "      ELSE 'Off-peak'\n",
+        "    END AS time_period,\n",
+        "    COUNT(*) AS supply\n",
+        "  FROM\n",
+        "    delta.`/Volumes/workspace/default/nyc_taxi_delta/2018` t\n",
+        "      JOIN delta.`/Volumes/workspace/default/nyc_taxi_delta/taxi_zones` z\n",
+        "        ON t.DOLocationID = z.LocationID\n",
+        "  WHERE\n",
+        "    z.borough IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    z.borough,\n",
+        "    time_period\n",
+        ")\n",
+        "SELECT\n",
+        "  COALESCE(d.borough, s.borough) AS borough,\n",
+        "  COALESCE(d.time_period, s.time_period) AS time_period,\n",
+        "  COALESCE(d.demand, 0) AS demand,\n",
+        "  COALESCE(s.supply, 0) AS supply,\n",
+        "  ROUND(COALESCE(d.demand, 0) / NULLIF(COALESCE(s.supply, 0), 0), 2) AS ratio\n",
+        "FROM\n",
+        "  demand d\n",
+        "    FULL OUTER JOIN supply s\n",
+        "      ON d.borough = s.borough\n",
+        "      AND d.time_period = s.time_period\n",
+        "ORDER BY\n",
+        "  borough,\n",
+        "  time_period"
+      ]
+    },
+    {
+      "name": "zone_rush_evening",
+      "displayName": "Zone Evening Rush (2018)",
+      "queryLines": [
+        "WITH demand AS (\n",
+        "  SELECT\n",
+        "    z.zone_name AS zone,\n",
+        "    z.borough AS borough,\n",
+        "    COUNT(*) AS demand\n",
+        "  FROM\n",
+        "    delta.`/Volumes/workspace/default/nyc_taxi_delta/2018` t\n",
+        "      JOIN delta.`/Volumes/workspace/default/nyc_taxi_delta/taxi_zones` z\n",
+        "        ON t.PULocationID = z.LocationID\n",
+        "  WHERE\n",
+        "    z.borough IS NOT NULL\n",
+        "    AND HOUR(t.tpep_pickup_datetime) BETWEEN 17 AND 19\n",
+        "  GROUP BY\n",
+        "    z.zone_name,\n",
+        "    z.borough\n",
+        "),\n",
+        "supply AS (\n",
+        "  SELECT\n",
+        "    z.zone_name AS zone,\n",
+        "    z.borough AS borough,\n",
+        "    COUNT(*) AS supply\n",
+        "  FROM\n",
+        "    delta.`/Volumes/workspace/default/nyc_taxi_delta/2018` t\n",
+        "      JOIN delta.`/Volumes/workspace/default/nyc_taxi_delta/taxi_zones` z\n",
+        "        ON t.DOLocationID = z.LocationID\n",
+        "  WHERE\n",
+        "    z.borough IS NOT NULL\n",
+        "    AND HOUR(t.tpep_dropoff_datetime) BETWEEN 17 AND 19\n",
+        "  GROUP BY\n",
+        "    z.zone_name,\n",
+        "    z.borough\n",
+        "),\n",
+        "zone_stats AS (\n",
+        "  SELECT\n",
+        "    COALESCE(d.zone, s.zone) AS zone,\n",
+        "    COALESCE(d.borough, s.borough) AS borough,\n",
+        "    COALESCE(d.demand, 0) AS demand,\n",
+        "    COALESCE(s.supply, 0) AS supply,\n",
+        "    ROUND(COALESCE(d.demand, 0) / NULLIF(COALESCE(s.supply, 0), 0), 2) AS ratio\n",
+        "  FROM\n",
+        "    demand d\n",
+        "      FULL OUTER JOIN supply s\n",
+        "        ON d.zone = s.zone\n",
+        "        AND d.borough = s.borough\n",
+        "  WHERE\n",
+        "    COALESCE(d.demand, 0) >= 50\n",
+        "),\n",
+        "ranked AS (\n",
+        "  SELECT\n",
+        "    zone,\n",
+        "    borough,\n",
+        "    demand,\n",
+        "    supply,\n",
+        "    ratio,\n",
+        "    ROW_NUMBER() OVER (PARTITION BY borough ORDER BY ratio DESC) AS rn\n",
+        "  FROM\n",
+        "    zone_stats\n",
+        ")\n",
+        "SELECT\n",
+        "  zone,\n",
+        "  borough,\n",
+        "  demand,\n",
+        "  supply,\n",
+        "  ratio\n",
+        "FROM\n",
+        "  ranked\n",
+        "WHERE\n",
+        "  rn <= 3\n",
+        "ORDER BY\n",
+        "  borough,\n",
+        "  ratio DESC"
+      ]
+    },
+    {
+      "name": "borough_weekend",
+      "displayName": "Borough Weekend vs Weekday (2018)",
+      "queryLines": [
+        "WITH demand AS (\n",
+        "  SELECT\n",
+        "    z.borough AS borough,\n",
+        "    CASE\n",
+        "      WHEN DAYOFWEEK(t.tpep_pickup_datetime) IN (1, 7) THEN 'Weekend'\n",
+        "      ELSE 'Weekday'\n",
+        "    END AS day_type,\n",
+        "    COUNT(*) AS demand\n",
+        "  FROM\n",
+        "    delta.`/Volumes/workspace/default/nyc_taxi_delta/2018` t\n",
+        "      JOIN delta.`/Volumes/workspace/default/nyc_taxi_delta/taxi_zones` z\n",
+        "        ON t.PULocationID = z.LocationID\n",
+        "  WHERE\n",
+        "    z.borough IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    z.borough,\n",
+        "    day_type\n",
+        "),\n",
+        "supply AS (\n",
+        "  SELECT\n",
+        "    z.borough AS borough,\n",
+        "    CASE\n",
+        "      WHEN DAYOFWEEK(t.tpep_dropoff_datetime) IN (1, 7) THEN 'Weekend'\n",
+        "      ELSE 'Weekday'\n",
+        "    END AS day_type,\n",
+        "    COUNT(*) AS supply\n",
+        "  FROM\n",
+        "    delta.`/Volumes/workspace/default/nyc_taxi_delta/2018` t\n",
+        "      JOIN delta.`/Volumes/workspace/default/nyc_taxi_delta/taxi_zones` z\n",
+        "        ON t.DOLocationID = z.LocationID\n",
+        "  WHERE\n",
+        "    z.borough IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    z.borough,\n",
+        "    day_type\n",
+        ")\n",
+        "SELECT\n",
+        "  COALESCE(d.borough, s.borough) AS borough,\n",
+        "  COALESCE(d.day_type, s.day_type) AS day_type,\n",
+        "  COALESCE(d.demand, 0) AS demand,\n",
+        "  COALESCE(s.supply, 0) AS supply,\n",
+        "  ROUND(COALESCE(d.demand, 0) / NULLIF(COALESCE(s.supply, 0), 0), 2) AS ratio\n",
+        "FROM\n",
+        "  demand d\n",
+        "    FULL OUTER JOIN supply s\n",
+        "      ON d.borough = s.borough\n",
+        "      AND d.day_type = s.day_type\n",
+        "ORDER BY\n",
+        "  borough,\n",
+        "  day_type"
+      ]
+    },
+    {
+      "name": "borough_hour",
+      "displayName": "Borough × Hour Ratio (2018)",
+      "queryLines": [
+        "WITH demand AS (\n",
+        "  SELECT\n",
+        "    z.borough AS borough,\n",
+        "    HOUR(t.tpep_pickup_datetime) AS hour,\n",
+        "    COUNT(*) AS demand\n",
+        "  FROM\n",
+        "    delta.`/Volumes/workspace/default/nyc_taxi_delta/2018` t\n",
+        "      JOIN delta.`/Volumes/workspace/default/nyc_taxi_delta/taxi_zones` z\n",
+        "        ON t.PULocationID = z.LocationID\n",
+        "  WHERE\n",
+        "    z.borough IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    z.borough,\n",
+        "    hour\n",
+        "),\n",
+        "supply AS (\n",
+        "  SELECT\n",
+        "    z.borough AS borough,\n",
+        "    HOUR(t.tpep_dropoff_datetime) AS hour,\n",
+        "    COUNT(*) AS supply\n",
+        "  FROM\n",
+        "    delta.`/Volumes/workspace/default/nyc_taxi_delta/2018` t\n",
+        "      JOIN delta.`/Volumes/workspace/default/nyc_taxi_delta/taxi_zones` z\n",
+        "        ON t.DOLocationID = z.LocationID\n",
+        "  WHERE\n",
+        "    z.borough IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    z.borough,\n",
+        "    hour\n",
+        ")\n",
+        "SELECT\n",
+        "  COALESCE(d.borough, s.borough) AS borough,\n",
+        "  COALESCE(d.hour, s.hour) AS hour,\n",
+        "  COALESCE(d.demand, 0) AS demand,\n",
+        "  COALESCE(s.supply, 0) AS supply,\n",
+        "  ROUND(COALESCE(d.demand, 0) / NULLIF(COALESCE(s.supply, 0), 0), 2) AS ratio\n",
+        "FROM\n",
+        "  demand d\n",
+        "    FULL OUTER JOIN supply s\n",
+        "      ON d.borough = s.borough\n",
+        "      AND d.hour = s.hour\n",
+        "ORDER BY\n",
+        "  borough,\n",
+        "  hour"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "5bee4f83",
+      "displayName": "Borough Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## 🚕 NYC Taxi Demand-Supply Dashboard\n",
+                "\n",
+                "**Data:** NYC Yellow Taxi, January 2018 | **3-color scheme:** 🔴 Shortage (ratio > 1.2) | 🟢 Balanced (0.8–1.2) | 🔵 Overflow (ratio < 0.8)\n",
+                "\n",
+                "**Key Finding:** Queens is the only borough with taxi shortage (ratio 1.36), driven by JFK & LaGuardia airports. Brooklyn/Bronx have excess taxis (ratio 0.28/0.13)."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ratio_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "borough_summary",
+                  "fields": [
+                    {
+                      "name": "borough",
+                      "expression": "`borough`"
+                    },
+                    {
+                      "name": "avg(ratio)",
+                      "expression": "AVG(`ratio`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Demand/Supply Ratio by Borough (2018)"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "borough",
+                  "displayName": "borough",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(ratio)",
+                  "displayName": "ratio",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "borough",
+                  "displayName": "borough",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "summary_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "borough_summary",
+                  "fields": [
+                    {
+                      "name": "borough",
+                      "expression": "`borough`"
+                    },
+                    {
+                      "name": "demand",
+                      "expression": "`demand`"
+                    },
+                    {
+                      "name": "supply",
+                      "expression": "`supply`"
+                    },
+                    {
+                      "name": "ratio",
+                      "expression": "`ratio`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Borough Summary Table"
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "borough"
+                  },
+                  {
+                    "fieldName": "demand"
+                  },
+                  {
+                    "fieldName": "supply"
+                  },
+                  {
+                    "fieldName": "ratio"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "demand_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "borough_summary",
+                  "fields": [
+                    {
+                      "name": "borough",
+                      "expression": "`borough`"
+                    },
+                    {
+                      "name": "sum(demand)",
+                      "expression": "SUM(`demand`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Demand (Pickups) by Borough"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "borough",
+                  "displayName": "borough",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(demand)",
+                  "displayName": "demand",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "borough",
+                  "displayName": "borough",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "supply_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "borough_summary",
+                  "fields": [
+                    {
+                      "name": "borough",
+                      "expression": "`borough`"
+                    },
+                    {
+                      "name": "sum(supply)",
+                      "expression": "SUM(`supply`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Supply (Dropoffs) by Borough"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "borough",
+                  "displayName": "borough",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(supply)",
+                  "displayName": "supply",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "borough",
+                  "displayName": "borough",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 9,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "desc_ratio",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**📖 คำอธิบาย:** Ratio = Demand ÷ Supply\n",
+                "- **สูง > 1.2** = ขาดแท็กซี่ (คนเรียกมากกว่ารถว่าง)\n",
+                "- **ใกล้ 1.0** = สมดุล\n",
+                "- **ต่ำ < 0.8** = แท็กซี่ล้น (รถว่างมากกว่าคนเรียก)\n",
+                "- Queens สูงสุดที่ 1.34 = ขาดแท็กซี่"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "desc_table",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**📖 คำอธิบาย:** ตารางแสดงจำนวนรวมของแต่ละเขต\n",
+                "- **Demand** = จำนวนครั้งที่มีคนเรียกแท็กซี่ (pickup)\n",
+                "- **Supply** = จำนวนครั้งที่แท็กซี่มาส่งคน (dropoff)\n",
+                "- **Ratio** = Demand ÷ Supply"
+              ]
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 15,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "desc_demand",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**📖 คำอธิบาย:** แสดงจำนวนการเรียกแท็กซี่แต่ละเขต\n",
+                "- **สูง** = มีคนเรียกแท็กซี่มาก (Manhattan สูงสุด ~7.9M)\n",
+                "- **ต่ำ** = มีคนเรียกน้อย (Staten Island ~108)"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "desc_supply",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**📖 คำอธิบาย:** แสดงจำนวนแท็กซี่ที่มาส่งผู้โดยสารแต่ละเขต\n",
+                "- **สูง** = แท็กซี่มาส่งคนเยอะ (อาจว่างรอรับคนใหม่)\n",
+                "- **ต่ำ** = แท็กซี่มาส่งน้อย\n",
+                "- Brooklyn มี Supply สูงกว่า Demand มาก = แท็กซี่ล้น"
+              ]
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 17,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "page_summary",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## 📋 สรุปผล: Borough Overview\n",
+                "\n",
+                "1. **Ratio by Borough:** Queens เป็นเขตเดียวที่ขาดแท็กซี่ (ratio 1.34) ส่วน Brooklyn (0.28) และ Bronx (0.13) แท็กซี่ล้นมาก\n",
+                "2. **Demand vs Supply:** Manhattan มีทั้ง demand และ supply สูงสุด (สมดุล) แต่ Brooklyn มี supply >> demand = รถไปส่งแล้วไม่ได้รับคนใหม่\n",
+                "3. **ตาราง Summary:** ใช้ดูตัวเลขจริงของแต่ละเขตเพื่อเปรียบเทียบและวางแผนจัดสรร\n",
+                "\n",
+                "**ข้อสังเกต:** ปัญหาหลักคือ Queens ขาดแท็กซี่ ส่วน Brooklyn/Bronx มีแท็กซี่เกิน → ควรย้ายรถจาก Brooklyn/Bronx ไป Queens"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 19,
+            "width": 12,
+            "height": 4
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "time_analysis",
+      "displayName": "Time-Based Analysis",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## 🕐 Time-Based Analysis\n",
+                "\n",
+                "**Rush Hour:** Evening Rush (17-19) is most critical — Queens ratio 1.71. **Weekend vs Weekday:** Queens ratio drops from 1.37 (weekday) to 1.25 (weekend)."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "rush_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "borough_rush",
+                  "fields": [
+                    {
+                      "name": "time_period",
+                      "expression": "`time_period`"
+                    },
+                    {
+                      "name": "borough",
+                      "expression": "`borough`"
+                    },
+                    {
+                      "name": "avg(ratio)",
+                      "expression": "AVG(`ratio`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Rush Hour Pattern: Ratio by Borough × Time Period"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "borough",
+                  "displayName": "borough",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(ratio)",
+                  "displayName": "ratio",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "time_period",
+                  "displayName": "time_period",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "weekend_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "borough_weekend",
+                  "fields": [
+                    {
+                      "name": "day_type",
+                      "expression": "`day_type`"
+                    },
+                    {
+                      "name": "borough",
+                      "expression": "`borough`"
+                    },
+                    {
+                      "name": "avg(ratio)",
+                      "expression": "AVG(`ratio`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Weekend vs Weekday Ratio"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "borough",
+                  "displayName": "borough",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(ratio)",
+                  "displayName": "ratio",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "day_type",
+                  "displayName": "day_type",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "hour_line",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "borough_hour",
+                  "fields": [
+                    {
+                      "name": "borough",
+                      "expression": "`borough`"
+                    },
+                    {
+                      "name": "hour",
+                      "expression": "`hour`"
+                    },
+                    {
+                      "name": "avg(ratio)",
+                      "expression": "AVG(`ratio`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Borough × Hour Ratio (2018)"
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "hour",
+                  "displayName": "hour",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(ratio)",
+                  "displayName": "ratio",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "borough",
+                  "displayName": "borough",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "desc_rush",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**📖 คำอธิบาย:** เปรียบเทียบ ratio ระหว่าง 3 ช่วงเวลา\n",
+                "- **Morning Rush (7-9)** = ช่วงเช้าไปทำงาน\n",
+                "- **Evening Rush (17-19)** = ช่วงเย็นกลับบ้าน (วิกฤต!)\n",
+                "- **Off-peak** = ช่วงอื่นๆ\n",
+                "- แท่งสูง = ขาดแท็กซี่ | แท่งต่ำ = ล้นแท็กซี่"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "desc_weekend",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**📖 คำอธิบาย:** เปรียบเทียบ ratio ระหว่างวันธรรมดา vs สุดสัปดาห์\n",
+                "- **Weekday** = จันทร์-ศุกร์ (คนไปทำงาน)\n",
+                "- **Weekend** = เสาร์-อาทิตย์\n",
+                "- ถ้า ratio ลดลงใน Weekend = คนเรียกแท็กซี่น้อยลงในวันหยุด"
+              ]
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 15,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "desc_hour",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**📖 คำอธิบาย:** แสดง ratio ตามชั่วโมง (0-23) ของแต่ละเขต\n",
+                "- เส้นสูงขึ้น = ขาดแท็กซี่ในชั่วโมงนั้น\n",
+                "- เส้นต่ำ = แท็กซี่ล้นในชั่วโมงนั้น\n",
+                "- ดูจุดพีกเพื่อรู้ว่าต้องจัดสรรแท็กซี่เพิ่มช่วงไหน"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "page_summary",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## 📋 สรุปผล: Time-Based Analysis\n",
+                "\n",
+                "1. **Rush Hour:** Queens ขาดแท็กซี่ทุกช่วง โดย Evening Rush (17-19) รุนแรงที่สุด (ratio 1.70) — คนกลับบ้านเรียกแท็กซี่เยอะแต่รถไม่พอ\n",
+                "2. **Weekend vs Weekday:** Queens สมดุลขึ้นในวันหยุด (ratio ลดจาก 1.37 → 1.25) — คนเรียกแท็กซี่น้อยลงในวันหยุด ส่วนเขตอื่นๆ ไม่ต่างกัน\n",
+                "3. **Hourly Pattern:** แต่ละเขตมี pattern ต่างกันตามชั่วโมง ใช้ดูจุดที่ต้องจัดสรรแท็กซี่เร่งด่วน\n",
+                "\n",
+                "**ข้อสังเกต:** ช่วง Evening Rush (17-19) คือช่วงวิกฤตที่ต้องจัดสรรแท็กซี่เพิ่มให้ Queens โดยเฉพาะ"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 19,
+            "width": 12,
+            "height": 4
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "zone_analysis",
+      "displayName": "Zone-Level Analysis",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## 📍 Zone-Level Analysis\n",
+                "\n",
+                "**Key Finding:** JFK Airport (ratio 3.35) and LaGuardia Airport (ratio 2.82) are the worst shortage zones — airports drive Queens' taxi shortage. 161 zones analyzed (demand >= 100): 7 shortage, 113 overflow, 41 balanced."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "zone_ratio_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "zone_summary",
+                  "fields": [
+                    {
+                      "name": "borough",
+                      "expression": "`borough`"
+                    },
+                    {
+                      "name": "zone",
+                      "expression": "`zone`"
+                    },
+                    {
+                      "name": "avg(ratio)",
+                      "expression": "AVG(`ratio`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Top Zones by Demand/Supply Ratio (2018)",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "zone",
+                  "displayName": "zone",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(ratio)",
+                  "displayName": "ratio",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "borough",
+                  "displayName": "borough",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "zone_evening_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "zone_rush_evening",
+                  "fields": [
+                    {
+                      "name": "borough",
+                      "expression": "`borough`"
+                    },
+                    {
+                      "name": "zone",
+                      "expression": "`zone`"
+                    },
+                    {
+                      "name": "avg(ratio)",
+                      "expression": "AVG(`ratio`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Top Zones in Evening Rush (17-19)",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "zone",
+                  "displayName": "zone",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(ratio)",
+                  "displayName": "ratio",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "borough",
+                  "displayName": "borough",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 3,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "zone_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "zone_summary",
+                  "fields": [
+                    {
+                      "name": "zone",
+                      "expression": "`zone`"
+                    },
+                    {
+                      "name": "borough",
+                      "expression": "`borough`"
+                    },
+                    {
+                      "name": "demand",
+                      "expression": "`demand`"
+                    },
+                    {
+                      "name": "supply",
+                      "expression": "`supply`"
+                    },
+                    {
+                      "name": "ratio",
+                      "expression": "`ratio`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Zone Summary Table"
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "zone"
+                  },
+                  {
+                    "fieldName": "borough"
+                  },
+                  {
+                    "fieldName": "demand"
+                  },
+                  {
+                    "fieldName": "supply"
+                  },
+                  {
+                    "fieldName": "ratio"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "desc_zone_ratio",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**📖 คำอธิบาย:** แสดง ratio ของแต่ละ zone (พื้นที่ย่อยในเขต)\n",
+                "- **สูง > 1.2** = ขาดแท็กซี่ (สีแดง)\n",
+                "- **ใกล้ 1.0** = สมดุล\n",
+                "- **ต่ำ < 0.8** = แท็กซี่ล้น (สีน้ำเงิน)\n",
+                "- JFK Airport สูงสุดที่ 3.35 = ขาดแท็กซี่มากที่สุด"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "desc_zone_evening",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**📖 คำอธิบาย:** แสดง ratio ของแต่ละ zone ในช่วง Evening Rush (17-19)\n",
+                "- ช่วงนี้คือช่วงวิกฤตที่คนกลับบ้านเรียกแท็กซี่เยอะที่สุด\n",
+                "- LaGuardia Airport สูงสุดที่ 4.65 = ขาดแท็กซี่รุนแรง"
+              ]
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 16,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "desc_zone_table",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**📖 คำอธิบาย:** ตารางแสดงข้อมูลระดับ zone ทั้งหมด (demand >= 100)\n",
+                "- **Zone** = ชื่อพื้นที่ย่อย | **Borough** = เขตที่ zone นั้นอยู่\n",
+                "- **Demand** = จำนวนครั้งที่มีคนเรียกแท็กซี่ | **Supply** = จำนวนครั้งที่แท็กซี่มาส่ง\n",
+                "- **Ratio** = Demand ÷ Supply | คัดเฉพาะ zone ที่มี demand >= 100 เพื่อกรอง noise"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 18,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "page_summary",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## 📋 สรุปผล: Zone-Level Analysis\n",
+                "\n",
+                "1. **Top Zones by Ratio:** JFK Airport (3.35) และ LaGuardia Airport (2.82) ขาดแท็กซี่มากที่สุด — สนามบินเป็นสาเหตุหลักที่ Queens ขาดแท็กซี่\n",
+                "2. **Evening Rush Zones:** LaGuardia Airport สูงสุดที่ 4.65 ในช่วงเย็น — คนเรียกแท็กซี่จากสนามบินเยอะมากแต่แท็กซี่ไปส่งที่สนามบินน้อย\n",
+                "3. **Zone Summary Table:** 161 zones ที่มี demand >= 100: 7 ขาด, 113 ล้น, 41 สมดุล — ส่วนใหญ่แท็กซี่ล้นเพราะรถไปส่งแล้วไม่ได้รับคนใหม่\n",
+                "\n",
+                "**ข้อสังเกต:** การจัดสรรแท็กซี่ควรเน้นส่งรถไป JFK และ LaGuardia โดยเฉพาะช่วง Evening Rush"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 20,
+            "width": 12,
+            "height": 4
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "allocation_plan",
+      "displayName": "Allocation Plan & Simulation",
+      "layout": [
+        {
+          "widget": {
+            "name": "overview",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## 🎯 Allocation Plan & Simulation\n",
+                "\n",
+                "**Borough-Level Plan (Evening Rush 17-19):**\n",
+                "- Brooklyn → Queens: 37,027 taxis moved\n",
+                "- Brooklyn → Manhattan: 4,599 taxis moved\n",
+                "- Bronx → Manhattan: 5,001 taxis moved\n",
+                "\n",
+                "**Result:** 12 borough×time combinations improved, 0 worsened, 6 unchanged."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "borough_results",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### 🏙️ Borough Allocation Results\n",
+                "\n",
+                "| Borough | Time Period | Before | After | Result |\n",
+                "|---|---|---|---|---|\n",
+                "| Queens | Evening Rush | 1.71 | 1.00 | ✅ Balanced |\n",
+                "| Brooklyn | Evening Rush | 0.25 | 1.00 | ✅ Balanced |\n",
+                "| Queens | Off-peak | 1.28 | 1.00 | ✅ Balanced |\n",
+                "| Brooklyn | Off-peak | 0.25 | 0.97 | ✅ Balanced |\n",
+                "| Brooklyn | Morning Rush | 0.76 | 1.00 | ✅ Balanced |\n",
+                "\n",
+                "**Recommendation:** Move taxis from Brooklyn (overflow) to Queens (shortage) during Evening Rush."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "zone_results",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### 📍 Zone Allocation Results\n",
+                "\n",
+                "| Zone | Time Period | Before | After | Result |\n",
+                "|---|---|---|---|---|\n",
+                "| LaGuardia Airport | Evening Rush | 4.65 | 1.00 | ✅ Balanced |\n",
+                "| JFK Airport | Off-peak | 3.67 | 1.00 | ✅ Balanced |\n",
+                "| LaGuardia Airport | Off-peak | 2.85 | 1.00 | ✅ Balanced |\n",
+                "| Midtown East | Evening Rush | 1.82 | 1.00 | ✅ Balanced |\n",
+                "| Yorkville East | Morning Rush | 2.62 | 1.00 | ✅ Balanced |\n",
+                "\n",
+                "**9 zones returned to balanced (ratio → 1.00) after reallocation.**"
+              ]
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 4,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "recommendations",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### 💡 Key Recommendations\n",
+                "\n",
+                "1. **Priority 1:** Send taxis to **LaGuardia Airport** during Evening Rush (ratio 4.65 → 1.00)\n",
+                "2. **Priority 2:** Send taxis to **JFK Airport** during Off-peak (ratio 3.67 → 1.00)\n",
+                "3. **Source zones:** Pull taxis from **Forest Hills, Flatbush, Crown Heights** (Brooklyn overflow zones)\n",
+                "4. **Weekend:** Queens becomes more balanced on weekends (ratio 1.37 → 1.25) — reduce special allocation\n",
+                "5. **Limitation:** Supply is a proxy (dropoff count), not actual idle taxi count. January data only — add all months for seasonal planning."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 12,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "desc_borough",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**📖 คำอธิบาย:** แสดงผลการจัดสรรระดับเขต (borough)\n",
+                "- **Before** = ratio ก่อนจัดสรร | **After** = ratio หลังจัดสรร\n",
+                "- ถ้า After ใกล้ 1.00 = สมดุลขึ้น = จัดสรรสำเร็จ\n",
+                "- Queens Evening Rush: 1.71 → 1.00 = ดีขึ้นมาก!"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "desc_zone",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**📖 คำอธิบาย:** แสดงผลการจัดสรรระดับ zone\n",
+                "- ย้ายแท็กซี่จาก zone ที่ล้น → zone ที่ขาด\n",
+                "- LaGuardia Airport: 4.65 → 1.00 = กลับสู่สมดุล\n",
+                "- JFK Airport: 3.67 → 1.00 = กลับสู่สมดุล (ใน Off-peak)"
+              ]
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 15,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "page_summary",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## 📋 สรุปผล: Allocation Plan & Simulation\n",
+                "\n",
+                "1. **แผนจัดสรร Borough:** ย้ายแท็กซี่จาก Brooklyn (ล้น) → Queens (ขาด) ในช่วง Evening Rush จำนวน 37,027 คัน — ผล: 12 กรณีดีขึ้น, 0 แย่ลง\n",
+                "2. **แผนจัดสรร Zone:** ส่งแท็กซี่ไป LaGuardia และ JFK Airport — 9 zones กลับสู่สมดุล (ratio → 1.00)\n",
+                "3. **ข้อจำกัด:** Supply เป็น proxy (dropoff count) ไม่ใช่จำนวนรถว่างจริง, ข้อมูลเดือนมกราคมเท่านั้น\n",
+                "\n",
+                "**ข้อสังเกต:** แผนจัดสรรทำให้ทั้งเขตที่ขาดและเขตที่ล้นกลับสู่สมดุล → สามารถนำไปใช้วางแผนจัดสรรแท็กซี่จริงได้"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 12,
+            "height": 4
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
