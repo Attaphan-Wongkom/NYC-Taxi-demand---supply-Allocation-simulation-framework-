@@ -12,7 +12,18 @@
 
 
 ---
+## 📂 Project Structure & Files Overview
 
+ตารางสรุปรายละเอียดไฟล์และโครงสร้างโฟลเดอร์ภายใน Repository นี้:
+
+| File / Folder | Type | Description |
+| :--- | :--- | :--- |
+| **`GeoJSON / LocationID Mappings`** | GeoJSON File | ข้อมูลพิกัดเชิงพื้นที่ (Spatial Coordinates) และไฟล์ Lookup อ้างอิงจากแหล่งข้อมูลภายนอก |
+| **`app.py`** | Python Source File | ซอร์สโค้ดหลักสำหรับรันและแสดงผล **Interactive Streamlit Web Application** |
+| **`NYC Taxi Demand-Supply Dashboard.json`** | JSON File | ไฟล์ JSON บันทึกการกำหนดค่าและผลลัพธ์สถิติหลักส่วนใหญ่ที่สรุปออกมาจาก Jupyter Notebook |
+| **`NYC Taxi Guide.pdf`** | Technical Reference | คู่มืออธิบายหลักการทำงานเชิงระบบและสถาปัตยกรรมข้อมูล (System & Architecture Manual) ไม่ใช่คู่มือการใช้งานสำหรับผู้ใช้ทั่วไป |
+| **`NYC TLC Draft.ipynb`** | Jupyter Notebook | สมุดบันทึกกระบวนการทำงานแบบ End-to-End ตั้งแต่ Data Cleaning, Data Transformation, การวิเคราะห์สถิติเพื่อหาความน่าเชื่อถือ จนถึงการเทรนและประเมินโมเดล **SARIMA** |
+| **`README.md`** | Markdown File | เอกสารอธิบายภาพรวมโปรเจกต์ สถาปัตยกรรมระบบ และรายละเอียดโครงสร้างไฟล์ |
 ## 📊 ข้อมูลที่ใช้
 
 - **แหล่ง**: NYC Taxi & Limousine Commission (TLC) Yellow Taxi Trip Data (Kaggle)
