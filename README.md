@@ -684,3 +684,41 @@ NYC Taxi Demand-Supply Dashboard.lvdash.json  # Lakeview dashboard (4 pages)
 4. **Airport vs local** แยก strategy ด้วย RatecodeID
 5. **Per-taxi cost-benefit** ไม่ใช่ per-route — ทำให้ label ไม่ขึ้นกับจำนวนรถ
 6. **3 มุมมอง**: notebook (วิเคราะห์), dashboard (ภาพรวม), app (ตัดสินใจ)
+
+## 📱 Interactive Application Walkthrough & Key Features
+
+ภาพรวมการทำงานและฟีเจอร์หลักของ **Streamlit Interactive Application** สำหรับวิเคราะห์ Demand-Supply และจำลองแผนการจัดสรรแท็กซี่แบบ Real-time:
+
+### 1. Macro Trend Analysis Mode (การวิเคราะห์แนวโน้มภาพรวม)
+โหมดวิเคราะห์สถิติพื้นฐาน ณ ช่วงเวลาทำนาย แสดงดัชนีชี้วัดความสมดุล (Shortage / Overflow / Balanced Zones) พร้อมกราฟแสดงแนวโน้มสถิติตลอด 24 ชั่วโมง แยกตามรายเขต (Borough)
+![Analysis Mode](docs/images/screen1_analysis.png)
+
+* **Key Indicators:** แสดงจำนวนโซนขาดแคลน (Shortage Zones), โซนเกินความต้องการ (Overflow Zones) และค่าเฉลี่ยสัดส่วน Demand/Supply
+* **Dynamic Metrics:** เลือกสลับการดูข้อมูลได้ทั้ง Ratio (Demand/Supply), Demand, Supply และค่าทิปเฉลี่ย (Avg Tip)
+
+---
+
+### 2. Spatial Before-vs-After Allocation Simulation (เปรียบเทียบก่อน-หลังจัดสรร)
+โหมดวางแผนจัดสรรที่แสดงผลลัพธ์ผ่าน Interactive Spatial Heatmap เปรียบเทียบสภาวะเมืองก่อนและหลังการกระจาย fleet แท็กซี่ ณ ช่วงเวลาเร่งด่วน (เช่น Evening Rush 18:00 น.)
+![Before vs After Allocation](docs/images/screen2_before_after.png)
+
+* **Spatial Redistribution:** แสดงเส้นทางการย้ายรถแท็กซี่จากโซนเกินไปยังโซนที่ขาดแคลนเพื่อลดการกระจุกตัว
+* **Real-time Impact:** แสดงผลการลดลงของ Shortage Zones ทันทีหลังจากการประมวลผลแผนจัดสรร
+
+---
+
+### 3. Unit Economics & Financial Impact Dashboard (วิเคราะห์ผลตอบแทนทางการเงิน)
+ประเมินความคุ้มค่าทางการเงินเชิงลึกรายเส้นทาง โดยคำนวณจากค่าน้ำมัน ค่าเสียโอกาส และการฟื้นฟูรายได้ เพื่อกรองเฉพาะเส้นทางที่คุ้มค่าที่สุด
+![Financial Impact](docs/images/screen3_financial.png)
+
+* **Financial KPI Cards:** แสดงตัวเลขสรุปรายได้เพิ่มเติม, ค่าใช้จ่ายในการย้ายรถ, กำไรสุทธิ (Net Benefit) และกำไรเฉลี่ยต่อทริป
+* **Route Profitability Table:** ตารางคัดกรองเส้นทางจัดสรร แบ่งเกณฑ์ความคุ้มค่า (> $20/hr) พร้อมแสดงระยะเวลาเดินทางและเวลาส่งล่วงหน้า
+
+---
+
+### 4. Wave Deployment Schedule (แผนการปล่อยรถย่อยลดคอขวด)
+ระบบแบ่งช่วงเวลาการปล่อยรถออกเป็น 6 เวฟย่อย (10-Minute Front-Loaded Intervals) เพื่อป้องกันปัญหาการจราจรติดขัด ณ จุดจอดคอย และอ้างอิงพฤติกรรมมนุษย์ที่ไม่กระจายเท่ากันในหนึ่งทั่วโมง
+![Wave Deployment Schedule](docs/images/screen4_wave_deployment.png)
+
+* **Front-Loaded Strategy:** กระจายสัดส่วนการปล่อยรถจาก W1 (25%) ไปจนถึง W6 (5%) เพื่อเข้าถึงพื้นที่ขาดแคลนได้เร็วที่สุด
+* **Operational Wave Table:** ตารางระบุจำนวนทริป ช่วงเวลาเดินทางถึงเป้าหมาย และเวลาออกเดินทางล่วงหน้าอย่างละเอียด
